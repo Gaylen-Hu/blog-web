@@ -1,5 +1,6 @@
 import Image from 'next/image'
 import { notFound } from 'next/navigation'
+import { Suspense } from 'react'
 import { getTranslations } from 'next-intl/server'
 import { Link } from '@/i18n/navigation'
 import { getArticleBySlug, getArticleSlugs, toApiLocale } from '@/lib/api'
@@ -9,9 +10,12 @@ import ReadingProgress from '@/components/ReadingProgress'
 import ArticleToc from '@/components/ArticleToc'
 import Comments from '@/components/Comments'
 import PrevNextNav from '@/components/PrevNextNav'
+import ColumnNavigation from '@/components/ColumnNavigation'
+import { ColumnAttribution } from '@/components/ColumnAttribution'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import { ArticleJsonLd, BreadcrumbJsonLd } from '@/components/JsonLd'
 
 // 未预生成的 slug 在运行时按需渲染
 export const dynamicParams = true
@@ -37,14 +41,56 @@ export async function generateStaticParams() {
   }
 }
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.new-universe.cn'
+
 export async function generateMetadata({ params }: PostPageProps): Promise<Metadata> {
   const { slug, locale } = await params
   const post = await getArticleBySlug(slug, toApiLocale(locale))
   if (!post) return { title: 'Post not found' }
+
+  const title = post.seo.metaTitle || `${post.title} - 墨千`
+  const description = post.seo.metaDescription || post.excerpt || ''
+  const canonical = `${SITE_URL}/${locale}/posts/${slug}`
+  const ogImage = post.seo.ogImage || post.coverImage || undefined
+
   return {
-    title: post.seo.metaTitle || `${post.title} - NOVA`,
-    description: post.seo.metaDescription || post.excerpt || '',
-    openGraph: post.seo.ogImage ? { images: [post.seo.ogImage] } : undefined,
+    title,
+    description,
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        'max-video-preview': -1,
+        'max-image-preview': 'large',
+        'max-snippet': -1,
+      },
+    },
+    alternates: {
+      canonical,
+      languages: {
+        zh: `${SITE_URL}/zh/posts/${slug}`,
+        en: `${SITE_URL}/en/posts/${slug}`,
+      },
+    },
+    openGraph: {
+      title,
+      description,
+      url: canonical,
+      siteName: '墨千',
+      type: 'article',
+      publishedTime: post.publishedAt,
+      modifiedTime: post.updatedAt || undefined,
+      authors: [post.author.name],
+      ...(ogImage ? { images: [{ url: ogImage, width: 1200, height: 630, alt: post.title }] } : {}),
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      ...(ogImage ? { images: [ogImage] } : {}),
+    },
   }
 }
 
@@ -58,6 +104,14 @@ export default async function PostPage({ params }: PostPageProps) {
 
   return (
     <article className="min-h-screen bg-white dark:bg-slate-950 pb-32 animate-page-fade">
+      <ArticleJsonLd post={post} locale={locale} />
+      <BreadcrumbJsonLd
+        items={[
+          { name: '首页', url: `${SITE_URL}/${locale}` },
+          { name: '文章', url: `${SITE_URL}/${locale}/posts` },
+          { name: post.title, url: `${SITE_URL}/${locale}/posts/${slug}` },
+        ]}
+      />
       <ReadingProgress />
       <ArticleToc items={tocItems} />
 
@@ -89,6 +143,8 @@ export default async function PostPage({ params }: PostPageProps) {
         <h1 className="text-4xl md:text-6xl font-bold text-[#111111] dark:text-white leading-[1.1] mb-8 tracking-tight">
           {post.title}
         </h1>
+
+        {post.columns.length > 0 && <ColumnAttribution columns={post.columns} />}
 
         <div className="flex items-center justify-between border-y border-gray-100 dark:border-slate-800 py-6 mb-16">
           <div className="flex items-center gap-3">
@@ -151,6 +207,10 @@ export default async function PostPage({ params }: PostPageProps) {
             </div>
           </div>
         )}
+
+        <Suspense fallback={null}>
+          <ColumnNavigation articleId={post.id} columns={post.columns} />
+        </Suspense>
 
         <PrevNextNav prevArticle={post.prevArticle} nextArticle={post.nextArticle} />
 
